@@ -1,0 +1,173 @@
+@import 'maplibre-gl/dist/maplibre-gl.css';
+
+:root {
+  --neon-blue: #00f3ff;
+  --neon-green: #00ff66;
+  --neon-violet: #bc13fe;
+  --neon-orange: #ff9100;
+  --bg-dark: #050505;
+}
+
+body, html {
+  margin: 0;
+  padding: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: var(--bg-dark);
+  color: white;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  overflow: hidden;
+}
+
+#root {
+  width: 100%;
+  height: 100%;
+}
+
+.map-container {
+  width: 100vw;
+  height: 100vh;
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.floating-panel {
+  position: absolute;
+  left: 24px;
+  top: 24px;
+  width: 320px;
+  background: rgba(8, 12, 16, 0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(0, 243, 255, 0.2);
+  border-radius: 16px;
+  padding: 24px;
+  z-index: 10;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.7), inset 0 0 20px rgba(0, 243, 255, 0.05);
+}
+
+.header {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: #00f3ff;
+  font-weight: 600;
+  margin-bottom: 20px;
+}
+
+.search-box {
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  margin-bottom: 24px;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+/* Custom Scrollbar for Neon Theme */
+.routes-list::-webkit-scrollbar {
+  width: 6px;
+}
+.routes-list::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+.routes-list::-webkit-scrollbar-thumb {
+  background: rgba(0, 243, 255, 0.3);
+  border-radius: 4px;
+}
+.routes-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 243, 255, 0.6);
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+.search-box:focus-within {
+  border-color: var(--neon-blue);
+  box-shadow: 0 0 16px rgba(0, 243, 255, 0.2);
+}
+
+.search-input {
+  background: transparent;
+  border: none;
+  color: white;
+  width: 100%;
+  outline: none;
+  font-size: 15px;
+}
+
+.search-input::placeholder {
+  color: rgba(255,255,255,0.4);
+}
+
+.route-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.route-item:hover {
+  transform: translateX(4px);
+}
+
+.route-item:last-child {
+  border-bottom: none;
+}
+
+.route-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.route-name {
+  font-weight: 500;
+  font-size: 15px;
+  margin-bottom: 4px;
+}
+
+.route-status {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.toggle {
+  width: 40px;
+  height: 20px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.1);
+  position: relative;
+  transition: all 0.3s ease;
+}
+
+.toggle.active {
+  background: rgba(255,255,255,0.2);
+}
+
+.toggle-knob {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: all 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+  box-shadow: 0 0 8px currentColor;
+}
+
+.toggle.active .toggle-knob {
+  left: 22px;
+}

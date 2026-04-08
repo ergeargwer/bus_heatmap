@@ -1,0 +1,7 @@
+- [x] 初始化 Vite + React 專案環境
+- [x] 安裝地圖底層組件 (`maplibre-gl`, `react-map-gl`) 與渲染組件 (`deck.gl`)
+- [x] 撰寫深色底圖與基本地圖框架 (介接 Carto Dark Matter 無金鑰高科技底圖)
+- [x] 生產 Mock 路線幾何資料 (使用數條交織的座標以模擬複雜路網)
+- [x] 建立左側浮動操作面板與搜尋欄
+- [x] 實作自定義 `TripsLayer` 或 `PathLayer` 達成螢光動畫與收縮消失物理動畫
+- [x] 撰寫測試文件並啟動伺服器
