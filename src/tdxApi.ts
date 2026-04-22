@@ -94,3 +94,53 @@ export async function searchBusRoutesByStation(stationName: string, city: string
 
   return routes;
 }
+
+export interface LiveBus {
+  plateNumb: string;
+  routeUid: string;
+  routeName: string;
+  position: [number, number];
+  speed: number;
+  direction: number;
+  busStatus: number;
+}
+
+export async function getLiveBuses(routeUids: string[], city: string = 'Taipei'): Promise<LiveBus[]> {
+  if (!routeUids || routeUids.length === 0) return [];
+  const token = await getTDXToken();
+  
+  // Create a filter string for multiple RouteUIDs. Using a batch filter to save API calls.
+  const filterString = routeUids.map(uid => `RouteUID eq '${uid}'`).join(' or ');
+  
+  // Fetch from RealTimeNearStop
+  try {
+    const res = await fetch(`https://tdx.transportdata.tw/api/basic/v2/Bus/RealTimeNearStop/City/${city}?$filter=${encodeURIComponent(filterString)}&$format=JSON`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    
+    if (!res.ok) return [];
+    
+    const data = await res.json();
+    const buses: LiveBus[] = [];
+    const seen = new Set<string>(); // to avoid duplicates
+    
+    for (const item of (data || [])) {
+      if (item.BusPosition && item.PlateNumb && !seen.has(item.PlateNumb)) {
+        seen.add(item.PlateNumb);
+        buses.push({
+          plateNumb: item.PlateNumb,
+          routeUid: item.RouteUID,
+          routeName: item.RouteName?.Zh_tw || '',
+          position: [item.BusPosition.PositionLon, item.BusPosition.PositionLat],
+          speed: item.Speed || 0,
+          direction: item.Direction || 0,
+          busStatus: item.BusStatus || 0
+        });
+      }
+    }
+    return buses;
+  } catch (error) {
+    console.error("Failed to fetch live buses", error);
+    return [];
+  }
+}

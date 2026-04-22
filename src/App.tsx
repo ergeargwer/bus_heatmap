@@ -4,7 +4,7 @@ import DeckGL from '@deck.gl/react';
 import { PathLayer, ScatterplotLayer } from '@deck.gl/layers';
 import { Search, Loader2 } from 'lucide-react';
 import { mockRoutes, centerStation as mockCenter } from './mockData';
-import { searchBusRoutesByStation, getStationCoordinate } from './tdxApi';
+import { searchBusRoutesByStation, getStationCoordinate, getLiveBuses, LiveBus } from './tdxApi';
 
 const MAP_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
 
@@ -28,6 +28,8 @@ export default function App() {
   const [routesData, setRoutesData] = useState<any[]>(() => [...mockRoutes]);
   const [centerCoord, setCenterCoord] = useState<[number, number]>(mockCenter);
   const [activeRoutes, setActiveRoutes] = useState<Set<string>>(new Set(mockRoutes.map(r => r.id)));
+  const [liveBuses, setLiveBuses] = useState<LiveBus[]>([]);
+  const [hoverInfo, setHoverInfo] = useState<any>(null);
   
   const [searchInput, setSearchInput] = useState("台北火車站");
   const [isLoading, setIsLoading] = useState(false);
@@ -55,6 +57,33 @@ export default function App() {
       routeAnchorRef.current[r.id] = getClosestPointIdx(r.path, centerCoord);
     });
   }, [routesData, centerCoord]);
+
+  useEffect(() => {
+    let interval: number;
+    let isSubscribed = true;
+
+    const fetchBuses = async () => {
+      if (activeRoutes.size === 0) {
+        if (isSubscribed) setLiveBuses([]);
+        return;
+      }
+      try {
+        const activeIds = Array.from(activeRoutes);
+        const buses = await getLiveBuses(activeIds);
+        if (isSubscribed) setLiveBuses(buses);
+      } catch (err) {
+        console.error("Live bus polling error", err);
+      }
+    };
+
+    fetchBuses();
+    interval = window.setInterval(fetchBuses, 15000);
+
+    return () => {
+      isSubscribed = false;
+      clearInterval(interval);
+    };
+  }, [activeRoutes]);
 
   useEffect(() => {
     let animationFrame: number;
@@ -188,6 +217,29 @@ export default function App() {
       lineWidthMinPixels: 3,
       getPosition: (d: any) => d.position,
       getLineColor: [0, 243, 255, 255]
+    }),
+    new ScatterplotLayer({
+      id: 'live-buses',
+      data: liveBuses,
+      pickable: true,
+      opacity: 0.9 + Math.sin(tick / 10) * 0.1, // Breathing effect
+      stroked: true,
+      filled: true,
+      radiusScale: 1,
+      radiusMinPixels: 4,
+      radiusMaxPixels: 8,
+      lineWidthMinPixels: 2,
+      getPosition: (d: LiveBus) => d.position,
+      getFillColor: (d: LiveBus) => {
+        const route = routesData.find(r => r.id === d.routeUid);
+        return route ? [...route.color, 255] : [255, 255, 255, 255];
+      },
+      getLineColor: [255, 255, 255, 255],
+      onHover: info => setHoverInfo(info),
+      updateTriggers: {
+        getFillColor: [routesData],
+        opacity: [tick]
+      }
     })
   ].filter(Boolean);
 
@@ -203,6 +255,17 @@ export default function App() {
         >
           <Map mapStyle={MAP_STYLE} />
         </DeckGL>
+        
+        {hoverInfo && hoverInfo.object && (
+          <div className="tooltip-container" style={{
+            left: hoverInfo.x,
+            top: hoverInfo.y
+          }}>
+            <div className="tooltip-plate">{hoverInfo.object.plateNumb}</div>
+            <div className="tooltip-detail">路線: {hoverInfo.object.routeName}</div>
+            <div className="tooltip-detail">時速: {hoverInfo.object.speed} km/h</div>
+          </div>
+        )}
       </div>
 
       <div className="floating-panel">

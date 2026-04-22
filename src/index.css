@@ -171,3 +171,37 @@ body, html {
 .toggle.active .toggle-knob {
   left: 22px;
 }
+
+/* Tooltip styles */
+.tooltip-container {
+  position: absolute;
+  z-index: 100;
+  pointer-events: none;
+  transform: translate(-50%, -120%);
+  background: rgba(8, 12, 16, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--neon-blue);
+  border-radius: 8px;
+  padding: 10px 14px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.8), 0 0 12px rgba(0, 243, 255, 0.3);
+  color: white;
+  min-width: 120px;
+  text-align: center;
+  transition: opacity 0.1s;
+}
+
+.tooltip-plate {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--neon-blue);
+  margin-bottom: 4px;
+  letter-spacing: 1px;
+  text-shadow: 0 0 8px var(--neon-blue);
+}
+
+.tooltip-detail {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.8);
+  margin-top: 2px;
+}
