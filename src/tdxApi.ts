@@ -5,142 +5,116 @@ let accessToken = '';
 
 export async function getTDXToken() {
   if (accessToken) return accessToken;
-  
+
   const params = new URLSearchParams();
   params.append('grant_type', 'client_credentials');
   params.append('client_id', CLIENT_ID);
   params.append('client_secret', CLIENT_SECRET);
 
-  const res = await fetch('https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token', {
+  const res = await fetch('/tdx-auth/auth/realms/TDXConnect/protocol/openid-connect/token', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded'
-    },
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: params.toString()
   });
-  
+
+  if (!res.ok) {
+    throw new Error(`TDX 授權失敗 (HTTP ${res.status})`);
+  }
+
   const data = await res.json();
+  if (!data.access_token) {
+    throw new Error('TDX 未回傳 access_token');
+  }
   accessToken = data.access_token;
   return accessToken;
 }
 
-function parseWKT(wkt: string): [number, number][] {
-  const matches = wkt.match(/[-]?\d+\.?\d*\s+[-]?\d+\.?\d*/g);
-  if (!matches) return [];
-  return matches.map(pt => {
-    const coords = pt.trim().split(/\s+/);
-    return [parseFloat(coords[0]), parseFloat(coords[1])];
-  });
+export interface NearbyStation {
+  uid: string;
+  name: string;
+  lon: number;
+  lat: number;
+  distance?: number;
 }
 
-export async function getStationCoordinate(stationName: string, city: string = 'Taipei') {
-  const token = await getTDXToken();
-  const res = await fetch(`https://tdx.transportdata.tw/api/basic/v2/Bus/Station/City/${city}?$filter=contains(StationName/Zh_tw,'${stationName}')&$top=1&$format=JSON`, {
-    headers: { 'Authorization': `Bearer ${token}` }
-  });
-  const data = await res.json();
-  if (data && data.length > 0) {
-    return [data[0].StationPosition.PositionLon, data[0].StationPosition.PositionLat];
-  }
-  return null;
-}
-
-export async function searchBusRoutesByStation(stationName: string, city: string = 'Taipei') {
-  const token = await getTDXToken();
-  
-  const etaRes = await fetch(`https://tdx.transportdata.tw/api/basic/v2/Bus/EstimatedTimeOfArrival/City/${city}?$filter=contains(StopName/Zh_tw,'${stationName}')&$select=RouteName,RouteUID&$format=JSON`, {
-    headers: { 'Authorization': `Bearer ${token}` }
-  });
-  const etaData = await etaRes.json();
-  
-  const uniqueRoutes = new Map<string, string>();
-  for (const item of (etaData || [])) {
-    if (item.RouteUID && item.RouteName?.Zh_tw) {
-      uniqueRoutes.set(item.RouteUID, item.RouteName.Zh_tw);
-    }
-  }
-
-  const routes = [];
-  const neonColors = [
-    { color: [0, 243, 255] as [number, number, number], str: 'var(--neon-blue)' },
-    { color: [0, 255, 102] as [number, number, number], str: 'var(--neon-green)' },
-    { color: [188, 19, 254] as [number, number, number], str: 'var(--neon-violet)' },
-    { color: [255, 145, 0] as [number, number, number], str: 'var(--neon-orange)' },
-    { color: [255, 0, 85] as [number, number, number], str: '#ff0055' }
-  ];
-
-  let colorIdx = 0;
-  for (const [uid, name] of uniqueRoutes.entries()) {
-    if (routes.length >= 10) break; // 防止載入時間過長
-
-    const shapeRes = await fetch(`https://tdx.transportdata.tw/api/basic/v2/Bus/Shape/City/${city}?$filter=RouteUID eq '${uid}'&$format=JSON`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    const shapeData = await shapeRes.json();
-    
-    if (shapeData && shapeData.length > 0 && shapeData[0].Geometry) {
-      const path = parseWKT(shapeData[0].Geometry);
-      const c = neonColors[colorIdx % neonColors.length];
-      routes.push({
-        id: uid,
-        name: name,
-        color: c.color,
-        neonColorStr: c.str,
-        path: path
-      });
-      colorIdx++;
-    }
-  }
-
-  return routes;
-}
-
-export interface LiveBus {
-  plateNumb: string;
-  routeUid: string;
-  routeName: string;
-  position: [number, number];
-  speed: number;
-  direction: number;
-  busStatus: number;
-}
-
-export async function getLiveBuses(routeUids: string[], city: string = 'Taipei'): Promise<LiveBus[]> {
-  if (!routeUids || routeUids.length === 0) return [];
-  const token = await getTDXToken();
-  
-  // Create a filter string for multiple RouteUIDs. Using a batch filter to save API calls.
-  const filterString = routeUids.map(uid => `RouteUID eq '${uid}'`).join(' or ');
-  
-  // Fetch from RealTimeNearStop
+export async function getStationSuggestions(keyword: string): Promise<NearbyStation[]> {
+  if (!keyword) return [];
   try {
-    const res = await fetch(`https://tdx.transportdata.tw/api/basic/v2/Bus/RealTimeNearStop/City/${city}?$filter=${encodeURIComponent(filterString)}&$format=JSON`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    
+    const res = await fetch(`/api/stations/suggest?q=${encodeURIComponent(keyword)}`);
     if (!res.ok) return [];
-    
-    const data = await res.json();
-    const buses: LiveBus[] = [];
-    const seen = new Set<string>(); // to avoid duplicates
-    
-    for (const item of (data || [])) {
-      if (item.BusPosition && item.PlateNumb && !seen.has(item.PlateNumb)) {
-        seen.add(item.PlateNumb);
-        buses.push({
-          plateNumb: item.PlateNumb,
-          routeUid: item.RouteUID,
-          routeName: item.RouteName?.Zh_tw || '',
-          position: [item.BusPosition.PositionLon, item.BusPosition.PositionLat],
-          speed: item.Speed || 0,
-          direction: item.Direction || 0,
-          busStatus: item.BusStatus || 0
-        });
-      }
-    }
-    return buses;
-  } catch (error) {
-    console.error("Failed to fetch live buses", error);
+    return res.json();
+  } catch {
     return [];
   }
 }
+
+export async function getNearbyStations(lon: number, lat: number, radius = 100): Promise<NearbyStation[]> {
+  try {
+    const res = await fetch(`/api/stations/nearby?lon=${lon}&lat=${lat}&radius=${radius}`);
+    if (!res.ok) return [];
+    return res.json();
+  } catch {
+    return [];
+  }
+}
+
+export async function searchBusRoutesByStation(stationName: string): Promise<{ routes: RouteData[]; center: [number, number] | null }> {
+  const res = await fetch(`/api/routes?station=${encodeURIComponent(stationName)}`);
+  if (!res.ok) throw new Error(`後端查詢失敗 (HTTP ${res.status})`);
+  return res.json();
+}
+
+export interface RouteData {
+  id: string;
+  name: string;
+  color: [number, number, number];
+  neonColorStr: string;
+  path: [number, number][];
+}
+
+export interface ApiTestResult {
+  label: string;
+  ok: boolean;
+  detail: string;
+}
+
+export async function testApiConnection(): Promise<ApiTestResult[]> {
+  const results: ApiTestResult[] = [];
+
+  let token = '';
+  try {
+    accessToken = '';
+    token = await getTDXToken();
+    results.push({ label: 'TDX 授權 Token', ok: !!token, detail: token ? '取得成功' : '無回傳 Token' });
+  } catch (e: unknown) {
+    results.push({ label: 'TDX 授權 Token', ok: false, detail: (e as Error)?.message || '連線失敗' });
+    return results;
+  }
+
+  try {
+    const res = await fetch(
+      `/tdx-api/api/basic/v2/Bus/Station/City/Taipei?$filter=contains(StationName/Zh_tw,'%E5%8F%B0%E5%8C%97')&$top=1&$select=StationUID,StationName&$format=JSON`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    const data = await res.json();
+    const ok = Array.isArray(data) && data.length > 0;
+    results.push({ label: '站位查詢', ok, detail: ok ? `回傳站名：${data[0].StationName?.Zh_tw}` : '無資料' });
+  } catch (e: unknown) {
+    results.push({ label: '站位查詢', ok: false, detail: (e as Error)?.message || '查詢失敗' });
+  }
+
+  try {
+    const res = await fetch(
+      `/tdx-api/api/basic/v2/Bus/Shape/City/Taipei?$top=1&$select=RouteUID,RouteName&$format=JSON`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    const data = await res.json();
+    const ok = Array.isArray(data) && data.length > 0;
+    results.push({ label: '路線幾何資料', ok, detail: ok ? `回傳路線：${data[0].RouteName?.Zh_tw}` : '無資料' });
+  } catch (e: unknown) {
+    results.push({ label: '路線幾何資料', ok: false, detail: (e as Error)?.message || '查詢失敗' });
+  }
+
+  return results;
+}
+
