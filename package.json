@@ -4,18 +4,30 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev:frontend": "vite",
+    "dev:backend": "tsx server/index.ts",
+    "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\"",
     "build": "vite build"
   },
   "dependencies": {
     "@deck.gl/core": "^9.0.0",
     "@deck.gl/layers": "^9.0.0",
     "@deck.gl/react": "^9.0.0",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node-cron": "^3.0.11",
+    "@types/pg": "^8.20.0",
+    "concurrently": "^9.2.1",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
     "lucide-react": "latest",
     "maplibre-gl": "^4.0.0",
+    "node-cron": "^4.2.1",
+    "pg": "^8.20.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-map-gl": "^7.1.7"
+    "react-map-gl": "^7.1.7",
+    "tsx": "^4.21.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.0",
