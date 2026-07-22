@@ -2,9 +2,14 @@ import React, { useState, useEffect, useRef } from 'react';
 import Map from 'react-map-gl/maplibre';
 import DeckGL from '@deck.gl/react';
 import { PathLayer, ScatterplotLayer } from '@deck.gl/layers';
-import { Search, Loader2 } from 'lucide-react';
+import { 
+  Search, Loader2, LocateFixed, Settings, MapPin, Database, X 
+} from 'lucide-react';
 import { mockRoutes, centerStation as mockCenter } from './mockData';
-import { searchBusRoutesByStation, getStationCoordinate, getLiveBuses, LiveBus } from './tdxApi';
+import { 
+  searchBusRoutesByStation, getStationCoordinate, getLiveBuses, LiveBus, 
+  getNearbyStations, getStationSuggestions, NearbyStation, getTDXToken, clearTDXTokenCache 
+} from './tdxApi';
 
 const MAP_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
 
@@ -25,6 +30,7 @@ function getClosestPointIdx(path: number[][], center: number[]) {
 }
 
 export default function App() {
+  // --- Basic State ---
   const [routesData, setRoutesData] = useState<any[]>(() => [...mockRoutes]);
   const [centerCoord, setCenterCoord] = useState<[number, number]>(mockCenter);
   const [activeRoutes, setActiveRoutes] = useState<Set<string>>(new Set(mockRoutes.map(r => r.id)));
@@ -33,6 +39,21 @@ export default function App() {
   
   const [searchInput, setSearchInput] = useState("台北火車站");
   const [isLoading, setIsLoading] = useState(false);
+
+  const [suggestions, setSuggestions] = useState<NearbyStation[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [isLocating, setIsLocating] = useState(false);
+  const [nearbyStations, setNearbyStations] = useState<NearbyStation[]>([]);
+  const [showNearbyList, setShowNearbyList] = useState(false);
+  const suggestDebounceRef = useRef<number | null>(null);
+
+  // --- Tab & Panel State ---
+  const [activeTab, setActiveTab] = useState<'controls' | 'settings'>('controls');
+
+  // --- Credentials/Settings State ---
+  const [tdxIdInput, setTdxIdInput] = useState(localStorage.getItem('tdx_client_id') || '');
+  const [tdxSecretInput, setTdxSecretInput] = useState(localStorage.getItem('tdx_client_secret') || '');
+  const [apiStatus, setApiStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
 
   // DeckGL 視角狀態管理，提供飛梭 (FlyTo) 平滑定位效果
   const [viewState, setViewState] = useState({
@@ -49,41 +70,14 @@ export default function App() {
   const animationRef = useRef<Record<string, number>>({}); 
   const routeAnchorRef = useRef<Record<string, number>>({}); // 精準目標站點記憶體
 
+  // --- Smart Path Contraction Physics ---
   useEffect(() => {
     routesData.forEach(r => {
       renderGeomsRef.current[r.id] = { path: r.path, opacity: 1 };
       animationRef.current[r.id] = 1;
-      // 在新資料進來時，為每條路徑完美計算出與目標站點最短距離的那個點，作為物理收縮的錨點！
       routeAnchorRef.current[r.id] = getClosestPointIdx(r.path, centerCoord);
     });
   }, [routesData, centerCoord]);
-
-  useEffect(() => {
-    let interval: number;
-    let isSubscribed = true;
-
-    const fetchBuses = async () => {
-      if (activeRoutes.size === 0) {
-        if (isSubscribed) setLiveBuses([]);
-        return;
-      }
-      try {
-        const activeIds = Array.from(activeRoutes);
-        const buses = await getLiveBuses(activeIds);
-        if (isSubscribed) setLiveBuses(buses);
-      } catch (err) {
-        console.error("Live bus polling error", err);
-      }
-    };
-
-    fetchBuses();
-    interval = window.setInterval(fetchBuses, 15000);
-
-    return () => {
-      isSubscribed = false;
-      clearInterval(interval);
-    };
-  }, [activeRoutes]);
 
   useEffect(() => {
     let animationFrame: number;
@@ -140,6 +134,37 @@ export default function App() {
     return () => cancelAnimationFrame(animationFrame);
   }, [activeRoutes, routesData]); 
 
+  // --- Live Bus Polling Hook ---
+  useEffect(() => {
+    let interval: number;
+    let isSubscribed = true;
+
+    const fetchBuses = async () => {
+      if (activeRoutes.size === 0) {
+        if (isSubscribed) setLiveBuses([]);
+        return;
+      }
+      try {
+        const activeIds = Array.from(activeRoutes);
+        const buses = await getLiveBuses(activeIds);
+        if (isSubscribed) {
+          setLiveBuses(buses);
+        }
+      } catch (err) {
+        console.error("Live bus polling error", err);
+      }
+    };
+
+    fetchBuses();
+    interval = window.setInterval(fetchBuses, 15000);
+
+    return () => {
+      isSubscribed = false;
+      clearInterval(interval);
+    };
+  }, [activeRoutes]);
+
+  // --- Interactive Functions ---
   const toggleRoute = (id: string) => {
     setActiveRoutes(prev => {
       const next = new Set(prev);
@@ -149,14 +174,12 @@ export default function App() {
     });
   };
 
-  const handleSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if(!searchInput) return;
+  const executeSearch = async (term: string) => {
+    if(!term) return;
     setIsLoading(true);
     try {
-      // 即時串接 TDX 尋找最新地理座標與路網資料！
-      const coord = await getStationCoordinate(searchInput);
-      const newRoutes = await searchBusRoutesByStation(searchInput);
+      const coord = await getStationCoordinate(term);
+      const newRoutes = await searchBusRoutesByStation(term);
       
       if(coord) {
         setCenterCoord(coord as [number, number]);
@@ -171,12 +194,130 @@ export default function App() {
       }
     } catch(err) {
       console.error(err);
-      alert("TDX API Request Failed");
+      alert("載入路線幾何失敗");
     } finally {
       setIsLoading(false);
     }
   };
 
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    executeSearch(searchInput);
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setSearchInput(val);
+    if (!val) {
+      setSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
+    
+    if (suggestDebounceRef.current) {
+      window.clearTimeout(suggestDebounceRef.current);
+    }
+    
+    suggestDebounceRef.current = window.setTimeout(async () => {
+      try {
+        const res = await getStationSuggestions(val);
+        setSuggestions(res);
+        setShowSuggestions(true);
+      } catch (err) {
+        console.error(err);
+      }
+    }, 300);
+  };
+
+  const handleSelectSuggestion = (name: string) => {
+    setSearchInput(name);
+    setShowSuggestions(false);
+    executeSearch(name);
+  };
+
+  const handleSelectNearbyStation = (name: string) => {
+    setSearchInput(name);
+    setShowNearbyList(false);
+    executeSearch(name);
+  };
+
+  const handleLocate = () => {
+    if (!navigator.geolocation) {
+      alert('您的瀏覽器不支援定位功能');
+      return;
+    }
+    setIsLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { longitude, latitude } = pos.coords;
+        try {
+          const res = await getNearbyStations(longitude, latitude, 100);
+          if (res.length > 0) {
+            setNearbyStations(res);
+            setShowNearbyList(true);
+            setViewState(v => ({...v, longitude, latitude, transitionDuration: 1800}));
+          } else {
+            alert('附近 100 公尺內未找到公車站位');
+          }
+        } catch (err) {
+          console.error(err);
+          alert('定位或查詢失敗');
+        } finally {
+          setIsLocating(false);
+        }
+      },
+      (err) => {
+        console.error(err);
+        alert('無法取得您的位置');
+        setIsLocating(false);
+      }
+    );
+  };
+
+  // --- API Testing & Settings Save ---
+  const handleTestApi = async () => {
+    setApiStatus('testing');
+    try {
+      const token = await getTDXToken();
+      if (token) {
+        setApiStatus('success');
+        alert("API 連線測試成功！已成功取得 TDX 授權。");
+      } else {
+        setApiStatus('error');
+        alert("API 連線異常：無法取得資料。");
+      }
+    } catch (err) {
+      console.error(err);
+      setApiStatus('error');
+      alert("API 連線失敗，請檢查網路或 API 密鑰。");
+    }
+  };
+
+  const handleSaveTdxSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (tdxIdInput.trim() && tdxSecretInput.trim()) {
+      localStorage.setItem('tdx_client_id', tdxIdInput.trim());
+      localStorage.setItem('tdx_client_secret', tdxSecretInput.trim());
+    } else {
+      localStorage.removeItem('tdx_client_id');
+      localStorage.removeItem('tdx_client_secret');
+    }
+    clearTDXTokenCache();
+    
+    setIsLoading(true);
+    try {
+      const token = await getTDXToken();
+      if (token) {
+        alert("TDX API 金鑰已變更並成功驗證！");
+      }
+    } catch (err: any) {
+      alert("金鑰驗證失敗：" + err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // --- Deck.gl Layers ---
   const layers = [
     new PathLayer({
       id: 'bus-routes',
@@ -269,54 +410,173 @@ export default function App() {
       </div>
 
       <div className="floating-panel">
-        <div className="header">NeoTransit System (LIVE TDX)</div>
-        
-        <form onSubmit={handleSearch} className="search-box">
-          {isLoading ? (
-            <Loader2 className="animate-spin" size={18} color="rgba(0,243,255,0.8)" style={{ marginRight: 12 }} />
-          ) : (
-            <Search size={18} color="rgba(255,255,255,0.4)" style={{ marginRight: 12 }} />
-          )}
-          <input 
-            type="text" 
-            className="search-input" 
-            placeholder="請輸入台灣公車站名..." 
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-          />
-        </form>
-
-        <div className="routes-list" style={{ maxHeight: 'calc(100vh - 200px)', overflowY: 'auto', paddingRight: '10px' }}>
-          {routesData.map(route => {
-            const isActive = activeRoutes.has(route.id);
-            return (
-              <div 
-                key={route.id} 
-                className="route-item"
-                onClick={() => toggleRoute(route.id)}
-              >
-                <div className="route-info">
-                  <span className="route-name" style={{ 
-                    color: isActive ? route.neonColorStr : 'rgba(255,255,255,0.5)',
-                    textShadow: isActive ? `0 0 10px ${route.neonColorStr}` : 'none'
-                  }}>
-                    {route.name}
-                  </span>
-                  <span className="route-status" style={{ color: isActive ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.2)' }}>
-                    {isActive ? 'LIVE TRACKING' : 'OFFLINE'}
-                  </span>
-                </div>
-                
-                <div className={`toggle ${isActive ? 'active' : ''}`} style={{ color: route.neonColorStr }}>
-                  <div 
-                    className="toggle-knob" 
-                    style={{ background: isActive ? route.neonColorStr : 'rgba(255,255,255,0.2)' }} 
-                  />
-                </div>
-              </div>
-            );
-          })}
+        <div className="header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>NeoTransit 視覺化網頁版</span>
+          <button 
+            type="button"
+            onClick={handleTestApi} 
+            disabled={apiStatus === 'testing'}
+            style={{
+              background: 'rgba(0, 0, 0, 0.4)', border: '1px solid',
+              borderColor: apiStatus === 'success' ? '#00ff66' : apiStatus === 'error' ? '#ff0055' : 'rgba(0, 243, 255, 0.4)',
+              borderRadius: '4px',
+              color: apiStatus === 'success' ? '#00ff66' : apiStatus === 'error' ? '#ff0055' : 'rgba(0, 243, 255, 0.8)',
+              cursor: apiStatus === 'testing' ? 'not-allowed' : 'pointer', 
+              padding: '4px 8px', fontSize: '10px', display: 'flex', alignItems: 'center', transition: 'all 0.2s',
+              letterSpacing: '1px'
+            }}
+          >
+            {apiStatus === 'testing' && <Loader2 size={10} className="animate-spin" style={{marginRight: '4px'}}/>}
+            測試 TDX
+          </button>
         </div>
+
+        {/* Tab Selector */}
+        <div className="panel-tabs">
+          <button 
+            type="button" 
+            className={`tab-btn ${activeTab === 'controls' ? 'active' : ''}`}
+            onClick={() => setActiveTab('controls')}
+          >
+            <MapPin size={14} /> 地圖控制
+          </button>
+          <button 
+            type="button" 
+            className={`tab-btn ${activeTab === 'settings' ? 'active' : ''}`}
+            onClick={() => setActiveTab('settings')}
+          >
+            <Settings size={14} /> 系統設定
+          </button>
+        </div>
+
+        {/* Tab 1: Map Controls */}
+        {activeTab === 'controls' && (
+          <div className="tab-content">
+            <form onSubmit={handleSearch} className="search-box">
+              {isLoading ? (
+                <Loader2 className="animate-spin" size={18} color="rgba(0,243,255,0.8)" style={{ marginRight: 12 }} />
+              ) : (
+                <Search size={18} color="rgba(255,255,255,0.4)" style={{ marginRight: 12 }} />
+              )}
+              <div className="autocomplete-wrapper">
+                <input 
+                  type="text" 
+                  className="search-input" 
+                  placeholder="請輸入台灣公車站名..." 
+                  value={searchInput}
+                  onChange={handleInputChange}
+                  onBlur={() => setShowSuggestions(false)}
+                />
+                {showSuggestions && suggestions.length > 0 && (
+                  <div className="autocomplete-dropdown">
+                    {suggestions.map(s => (
+                      <div
+                        key={s.uid}
+                        className="autocomplete-item"
+                        onMouseDown={() => handleSelectSuggestion(s.name)}
+                      >
+                        {s.name}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <button 
+                type="button" 
+                className="locate-btn" 
+                onClick={handleLocate}
+                disabled={isLocating}
+              >
+                {isLocating ? <Loader2 className="animate-spin" size={16} /> : <LocateFixed size={16} />}
+              </button>
+            </form>
+
+            {showNearbyList && (
+              <div className="nearby-list">
+                <div className="nearby-list-header">
+                  <span>附近站位（100m）</span>
+                  <button onClick={() => setShowNearbyList(false)}><X size={12} /></button>
+                </div>
+                {nearbyStations.map(s => (
+                  <div
+                    key={s.uid}
+                    className="nearby-item"
+                    onClick={() => handleSelectNearbyStation(s.name)}
+                  >
+                    {s.name}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="routes-list" style={{ maxHeight: 'calc(100vh - 220px)', overflowY: 'auto', paddingRight: '10px' }}>
+              {routesData.map(route => {
+                const isActive = activeRoutes.has(route.id);
+                return (
+                  <div 
+                    key={route.id} 
+                    className="route-item"
+                    onClick={() => toggleRoute(route.id)}
+                  >
+                    <div className="route-info">
+                      <span className="route-name" style={{ 
+                        color: isActive ? route.neonColorStr : 'rgba(255,255,255,0.5)',
+                        textShadow: isActive ? `0 0 10px ${route.neonColorStr}` : 'none'
+                      }}>
+                        {route.name}
+                      </span>
+                      <span className="route-status" style={{ color: isActive ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.2)' }}>
+                        {isActive ? '即時追蹤中' : '無即時資料'}
+                      </span>
+                    </div>
+                    
+                    <div className={`toggle ${isActive ? 'active' : ''}`} style={{ color: route.neonColorStr }}>
+                      <div 
+                        className="toggle-knob" 
+                        style={{ background: isActive ? route.neonColorStr : 'rgba(255,255,255,0.2)' }} 
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Tab 2: System Settings */}
+        {activeTab === 'settings' && (
+          <div className="tab-content">
+            {/* TDX Credentials Settings */}
+            <form onSubmit={handleSaveTdxSettings} className="settings-group">
+              <div className="settings-title">
+                <Database size={14} /> 台灣 TDX API 憑證自訂
+              </div>
+              <div className="form-field">
+                <label>Client ID</label>
+                <input 
+                  type="text" 
+                  className="form-input" 
+                  placeholder="留空即使用 PoC 展示金鑰" 
+                  value={tdxIdInput} 
+                  onChange={(e) => setTdxIdInput(e.target.value)}
+                />
+              </div>
+              <div className="form-field">
+                <label>Client Secret</label>
+                <input 
+                  type="password" 
+                  className="form-input" 
+                  placeholder="留空即使用 PoC 展示金鑰" 
+                  value={tdxSecretInput} 
+                  onChange={(e) => setTdxSecretInput(e.target.value)}
+                />
+              </div>
+              <button type="submit" className="btn-submit">
+                驗證並儲存 TDX 憑證
+              </button>
+            </form>
+          </div>
+        )}
       </div>
     </>
   );
